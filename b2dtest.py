@@ -58,11 +58,12 @@ class RayCallback(b2RayCastCallback):
         return fraction
 
 class Wheel:
-    def __init__(self, world, chassis, start, suspension_length, tire_radius, kSpring=100.0, cDamp=0.5):
+    def __init__(self, world, chassis, start, suspension_length, tire_radius, kSpring=900.0, cDamp=25.0):
         self.world = world
         self.chassis = chassis
         # self.callback = RayCallback(chassis)
         self.ray_length = suspension_length + tire_radius
+        self.suspension_length = suspension_length
         self.start = start
         self.end = b2Vec2(start.x, start.y - (suspension_length + tire_radius))
 
@@ -79,12 +80,46 @@ class Wheel:
         # do raycast
         self.world.RayCast(self.callback, self.ray_start, self.ray_end)
 
-        if self.callback.fixture != None and (self.callback.fraction < 1.0 and self.callback.fraction > 0.0):
-            print(f"Got Hit! pos: {self.callback.point}, norm: {self.callback.normal}")
+        if self.hasContact():
+            # print(f"Got Hit! pos: {self.callback.point}, norm: {self.callback.normal}")
+            self.computeSpringForce()
 
     
-        
+    def hasContact(self):
+        return self.callback.fixture != None and (self.callback.fraction < 1.0 and self.callback.fraction > 0.0)
 
+    def computeSpringForce(self):
+        # Fspring = k.x - c.v
+        # grab data
+        ct_pos = self.callback.point
+        ct_norm = self.callback.normal
+        b2 = self.callback.fixture.body
+        
+        # velocity of contacts?
+        v1 = self.chassis.GetLinearVelocityFromWorldPoint(ct_pos)
+        v2 = b2.GetLinearVelocityFromWorldPoint(ct_pos)
+
+        v = (v1-v2)
+        print(f"v: {v}, n: {ct_norm}")
+
+        up = self.chassis.GetWorldVector(b2Vec2(0.0, 1.0))
+        scaleFactor = b2Vec2.dot(up, ct_norm)
+
+        # compute distance (dx)
+        dx = (1.0 - self.callback.fraction) * self.suspension_length
+
+        fSpring = self.kSpring * dx * scaleFactor
+        fDamp = self.cDamp * b2Vec2.dot(v, ct_norm)
+
+        self.fSpring = fSpring - fDamp
+        print(f"fSpring: {fSpring:.2f}, fDamp: {fDamp:.2f}")
+
+        # final spring force?
+        vSpring = b2Vec2(ct_norm) * self.fSpring
+        print(-vSpring)
+
+        self.chassis.ApplyForce(vSpring, ct_pos, True)
+        b2.ApplyForce(-vSpring, ct_pos, True)
 
 # --- pygame setup ---
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), 0, 32)
@@ -127,12 +162,14 @@ body = world.CreateDynamicBody(position=(30, 45), angle=15)
 box = body.CreatePolygonFixture(box=(2, 1), density=1, friction=0.3)
 
 # a bigger box on the left
-car_body = world.CreateDynamicBody(position=(3, 5), angle=0)
-car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=1, friction=0.3)
+car_body = world.CreateDynamicBody(position=(5, 5), angle=0)
+car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=1.5, friction=0.3)
 
-front_wheel = Wheel(world, car_body, b2Vec2(1.2, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS)
+front_wheel = Wheel(world, car_body, b2Vec2(1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS)
+rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS)
 
 wheels.append(front_wheel)
+wheels.append(rear_wheel)
 
 # print(body)
 
@@ -188,9 +225,11 @@ def draw_ray_hit(pos, normal):
 # --- main game loop ---
 
 torque_mult = 0
+bump_chassis = 0
 
 running = True
 while running:
+    bump_chassis = 0
     # Check the event queue
     for event in pygame.event.get():
         if event.type == QUIT or (event.type == KEYDOWN and event.key == K_ESCAPE):
@@ -206,8 +245,14 @@ while running:
             torque_mult += 1
         if event.type == KEYUP and event.key == K_a:
             torque_mult -= 1
+
+        if event.type == KEYDOWN and event.key == pygame.K_RIGHT:
+            bump_chassis += 1
+        if event.type == KEYDOWN and event.key == pygame.K_LEFT:
+            bump_chassis -= 1
     
     tire.ApplyTorque(torque_mult * 5.0, True)
+    car_body.ApplyForceToCenter(b2Vec2(bump_chassis * 100.0, 0.0), True)
 
     # pygame.display.set_caption(f'{tire.}')
     pygame.display.set_caption(f'tire vel: {tire.linearVelocity.x:.2f}, {tire.linearVelocity.y:.2f}')
