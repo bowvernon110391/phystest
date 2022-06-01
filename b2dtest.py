@@ -20,6 +20,7 @@ from pygame.locals import (QUIT, KEYDOWN, K_ESCAPE, KEYUP, K_a, K_d)
 import Box2D  # The main library
 # Box2D.b2 maps Box2D.b2Vec2 to vec2 (and so on)
 from Box2D.b2 import (world, polygonShape, circleShape, staticBody, dynamicBody)
+from Box2D import b2RayCastCallback, b2Vec2, b2Vec2_zero
 
 # --- constants ---
 # Box2D deals with meters, but we want to display pixels,
@@ -29,6 +30,62 @@ TARGET_FPS = 60
 TIME_STEP = 1.0 / TARGET_FPS
 SCREEN_WIDTH, SCREEN_HEIGHT = 640, 480
 
+TIRE_RADIUS = 0.5
+SUSPENSION_LENGTH = 1.75
+
+# custom callback
+class RayCallback(b2RayCastCallback):
+    def __init__(self, chassis):
+        super().__init__()
+        self.fixture = None
+        self.chassis = chassis
+    
+    def ReportFixture(self, fixture, point, normal, fraction):
+        # skip if it's the car chassis
+        if fixture in self.chassis.fixtures:
+            return 1.0
+
+        # otherwise, record closest
+        self.fixture = fixture
+        self.point = point
+        self.normal = normal
+        self.fraction = fraction
+
+        # print(self.fixture)
+        # print(self.point)
+        # print(self.normal)
+        # print(fraction)
+        return fraction
+
+class Wheel:
+    def __init__(self, world, chassis, start, suspension_length, tire_radius, kSpring=100.0, cDamp=0.5):
+        self.world = world
+        self.chassis = chassis
+        # self.callback = RayCallback(chassis)
+        self.ray_length = suspension_length + tire_radius
+        self.start = start
+        self.end = b2Vec2(start.x, start.y - (suspension_length + tire_radius))
+
+        self.cDamp = cDamp
+        self.kSpring = kSpring
+
+    def update(self):
+        self.callback = RayCallback(self.chassis)
+        # compute ray ends
+        self.ray_start = self.chassis.GetWorldPoint(self.start)
+        self.ray_end = self.chassis.GetWorldPoint(self.end)
+        # print(f"start: {self.ray_start}")
+        # print(f"end: {self.ray_end}")
+        # do raycast
+        self.world.RayCast(self.callback, self.ray_start, self.ray_end)
+
+        if self.callback.fixture != None and (self.callback.fraction < 1.0 and self.callback.fraction > 0.0):
+            print(f"Got Hit! pos: {self.callback.point}, norm: {self.callback.normal}")
+
+    
+        
+
+
 # --- pygame setup ---
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), 0, 32)
 pygame.display.set_caption('Simple pygame example')
@@ -37,6 +94,8 @@ clock = pygame.time.Clock()
 # --- pybox2d world setup ---
 # Create the world
 world = world(gravity=(0, -10), doSleep=True)
+
+wheels = []
 
 # And a static body to hold the ground shape
 ground_body = world.CreateStaticBody(
@@ -68,8 +127,14 @@ body = world.CreateDynamicBody(position=(30, 45), angle=15)
 box = body.CreatePolygonFixture(box=(2, 1), density=1, friction=0.3)
 
 # a bigger box on the left
-body = world.CreateDynamicBody(position=(3, 5), angle=0)
-box = body.CreatePolygonFixture(box=(1, 2), density=1, friction=0.3)
+car_body = world.CreateDynamicBody(position=(3, 5), angle=0)
+car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=1, friction=0.3)
+
+front_wheel = Wheel(world, car_body, b2Vec2(1.2, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS)
+
+wheels.append(front_wheel)
+
+# print(body)
 
 colors = {
     staticBody: (255, 255, 255, 255),
@@ -102,6 +167,23 @@ def my_draw_circle(circle, body, fixture):
     # Note: Python 3.x will enforce that pygame get the integers it requests,
     #       and it will not convert from float.
 circleShape.draw = my_draw_circle
+
+def my_draw_ray(wheel):
+    if (wheel.ray_start == None) or (wheel.ray_end == None):
+        return
+
+    # draw here
+    pos1 = (wheel.ray_start.x * PPM, SCREEN_HEIGHT - wheel.ray_start.y * PPM)
+    pos2 = (wheel.ray_end.x * PPM, SCREEN_HEIGHT - wheel.ray_end.y * PPM)
+    # print(pos1)
+    # print(pos2)
+    # # pygame.draw.line(screen, (255, 0, 0, 255), [int(x) for x in pos1], [int(x) for x in pos2])
+    pygame.draw.line(screen, (0, 127, 0, 255), pos1, pos2)
+    pygame.draw.circle(screen, (125, 0, 0, 255), pos1, 4.0)
+    pygame.draw.circle(screen, (125, 0, 127, 255), pos2, 4.0)
+
+def draw_ray_hit(pos, normal):
+    pass
 
 # --- main game loop ---
 
@@ -136,8 +218,17 @@ while running:
         for fixture in body.fixtures:
             fixture.shape.draw(body, fixture)
 
+    mx, my = pygame.mouse.get_pos()
+    # print(f"mouse: {mx}, {my}")
+    pygame.draw.circle(screen, (127, 0, 0, 255), (int(mx), int(my)), 20.0)
+
     # Make Box2D simulate the physics of our world for one step.
     world.Step(TIME_STEP, 10, 10)
+
+    # wheel sim
+    for w in wheels:
+        w.update()
+        my_draw_ray(w)
 
     # Flip the screen and try to keep at the target FPS
     pygame.display.flip()
