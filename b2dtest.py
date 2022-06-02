@@ -382,6 +382,15 @@ def my_draw_ray(wheel):
 torque_mult = 0
 bump_chassis = 0
 
+modes = [{
+    'name': "Front Wheel Drive",
+    'wheel': front_wheel
+}, {
+    'name': "Rear Wheel Drive",
+    'wheel': rear_wheel
+}]
+mode = 0
+
 running = True
 
 last_tick = pygame.time.get_ticks() / 1000.0
@@ -409,13 +418,21 @@ while running:
             bump_chassis += 1
         if event.type == KEYDOWN and event.key == pygame.K_LEFT:
             bump_chassis -= 1
+
+        if event.type == KEYUP and event.key == pygame.K_m:
+            mode = (mode + 1) & 1
+            
     
     # tire.ApplyTorque(torque_mult * 5.0, True)
-    front_wheel.applyTorque(torque_mult * 50.0)
+    w = modes[mode]['wheel']
+    t = torque_mult * 150.0
+    w.applyTorque(t)
     car_body.ApplyLinearImpulse(b2Vec2(bump_chassis * 100.0, 0.0), car_body.position, True)
 
+    pygame.display.set_caption(f"Mode: {modes[mode]['name']}, Torque: {t:.2f} Nm")
+
     # pygame.display.set_caption(f'{tire.}')
-    pygame.display.set_caption(f'tire vel: {tire.linearVelocity.x:.2f}, {tire.linearVelocity.y:.2f}')
+    # pygame.display.set_caption(f'tire vel: {tire.linearVelocity.x:.2f}, {tire.linearVelocity.y:.2f}')
 
     screen.fill((0, 0, 0, 0))
     # Draw the world
