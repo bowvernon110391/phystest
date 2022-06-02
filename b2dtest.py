@@ -29,7 +29,7 @@ from Box2D import b2RayCastCallback, b2Vec2, b2Vec2_zero
 PPM = 20.0  # pixels per meter
 TARGET_FPS = 60
 TIME_STEP = 1.0 / TARGET_FPS
-SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
+SCREEN_WIDTH, SCREEN_HEIGHT = 1024, 600
 
 TIRE_RADIUS = 0.5
 SUSPENSION_LENGTH = 1.75
@@ -89,6 +89,7 @@ class Wheel:
 
         self.rotation = 0.0 # in radians
         self.angVel = 0.0 # in rad/sec
+        self.old_angular_vel = 0.0  # for constraint solver
         self.torque = 0.0 # in Newton meter
 
         # for constraint resolution
@@ -97,11 +98,18 @@ class Wheel:
 
         # for debug
         self.debug_ground_vel = (0.0, 0.0)
+        self.debug_hub_vel = (0.0, 0.0)
+        self.debug_patch_vel = 0.0
+
+        self.debug_last_impulse = (0.0, 0.0)
+        self.debug_last_angular_impulse = 0.0
+        self.debug_max_angular_impulse = 0.0
 
     def applyTorque(self, t):
         self.torque += t
 
     def applyImpulse(self, p, pos, norm):
+        
         # apply impulse to the chassis at specified position?
         self.chassis.ApplyLinearImpulse(p, pos, True)
 
@@ -111,11 +119,25 @@ class Wheel:
 
         angularImpulse = b2Vec2.dot(p, tangent)
         # print(f"angular_impulse: {angularImpulse:.2f}")
+
+        # compute proportion of impulse felt by the tire
+        # total_inertia = self.invInertia + (1.0 / self.chassis.inertia)
+        # proportion = self.invInertia / total_inertia
+
+        self.debug_max_angular_impulse = -self.angVel / self.invInertia
+
+        max_angular_impulse = abs(self.debug_max_angular_impulse)
+
+        # angularImpulse = clamp(angularImpulse, -max_angular_impulse, max_angular_impulse)
+
         self.angVel += self.invInertia * angularImpulse
 
-    def getWorldVel(self, pos, normal):
+        self.debug_last_impulse = p
+        self.debug_last_angular_impulse = angularImpulse
+
+    def getWorldVel(self, pos, normal, use_old_vel=False):
         v1 = self.chassis.GetLinearVelocityFromWorldPoint(pos)
-        v2 = b2Vec2(cross(normal)) * self.tire_radius * self.angVel
+        v2 = b2Vec2(cross(normal)) * self.tire_radius * (self.old_angular_vel if use_old_vel else self.angVel)
         return v1 + v2
 
     def update(self):
@@ -142,6 +164,7 @@ class Wheel:
             self.computeSpringForce()
 
         # integrate velocity and position
+        self.old_angular_vel = self.angVel
         self.angVel += self.torque * self.invInertia * TIME_STEP
 
         # clear torque
@@ -149,6 +172,7 @@ class Wheel:
 
     def updatePosition(self):
         self.rotation += self.angVel * TIME_STEP
+        # self.angVel *= 0.8
     
     def hasContact(self):
         return self.callback.fixture != None and (self.callback.fraction < 1.0 and self.callback.fraction > 0.0)
@@ -158,6 +182,10 @@ class Wheel:
         self.accumT = 0.0
         self.massT = 0.0
         self.realFriction = 0.0
+
+        self.debug_patch_vel = 0.0
+        self.debug_hub_vel = (0.0, 0.0)
+
         # compute mass?
         if self.hasContact():
             self.realFriction = sqrt(self.friction * self.callback.fixture.friction)
@@ -192,8 +220,14 @@ class Wheel:
             if b2.inertia > 0.0:
                 total_mass += 1.0 / b2.inertia * (b2Vec2.dot(r2, r2) - rn2 * rn2)
 
+            # let's add tire mass and inertia?
+            total_mass += self.invMass
+            total_mass += self.invInertia * self.tire_radius * self.tire_radius
+
             if total_mass > 0.0:
                 self.massT = 1.0 / total_mass
+
+        # print(f"massT: {self.massT:.4f}")
 
         # print(f"massT: {self.massT:.2f}, norm_imp: {self.accumN:.2f}, friction: {self.realFriction:.2f}")
 
@@ -213,7 +247,8 @@ class Wheel:
         self.debug_ground_vel = dv
 
         vt = b2Vec2.dot(dv, self.tangent)
-        # print(f"vel: {vt}")
+
+        print(f"target_vel: {vt}")
 
         dPt = self.massT * -vt
 
@@ -232,6 +267,9 @@ class Wheel:
         # print(f"pt: {pt}")
         self.applyImpulse(pt, ct_point, ct_normal)
         b2.ApplyLinearImpulse(-pt, ct_point, True)        
+
+        self.debug_hub_vel = self.chassis.GetLinearVelocityFromWorldPoint(ct_point)
+        self.debug_patch_vel = self.angVel * self.tire_radius
 
     def computeSpringForce(self):
         # Fspring = k.x - c.v
@@ -277,9 +315,9 @@ pygame.font.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), 0, 32)
 pygame.display.set_caption('Simple pygame example')
 clock = pygame.time.Clock()
-default_font = pygame.font.SysFont('Arial', 20)
+default_font = pygame.font.SysFont('Arial', 16)
 
-def draw_text(text, pos, color=(255,255,255), size=20):
+def draw_text(text, pos, color=(255,255,255)):
     img = default_font.render(text, True, color)
     screen.blit(img, pos)
 
@@ -371,6 +409,11 @@ def draw_wheel(pos, radius, rotation, color=(200, 0, 100, 255)):
     # print(line_end)
     pygame.draw.line(screen, color, pos, line_end)
 
+def draw_contact(pos, normal):
+
+
+    pygame.draw.line()
+
 def my_draw_ray(wheel):
     if not hasattr(wheel, 'ray_start') or not hasattr(wheel, 'ray_end'):
         return
@@ -378,6 +421,8 @@ def my_draw_ray(wheel):
     # draw here
     pos1 = (wheel.ray_start.x * PPM, SCREEN_HEIGHT - wheel.ray_start.y * PPM)
     pos2 = (wheel.ray_end.x * PPM, SCREEN_HEIGHT - wheel.ray_end.y * PPM)
+
+    ct_point = [int(v1 * (1.0-wheel.fraction) + v2 * wheel.fraction) for (v1, v2) in zip(pos1, pos2)]
     # print(pos1)
     # print(pos2)
     # # pygame.draw.line(screen, (255, 0, 0, 255), [int(x) for x in pos1], [int(x) for x in pos2])
@@ -385,10 +430,15 @@ def my_draw_ray(wheel):
     pygame.draw.circle(screen, (125, 0, 0, 255), pos1, 4.0)
     pygame.draw.circle(screen, (125, 0, 127, 255), pos2, 4.0)
 
+    # contact point
+    pygame.draw.circle(screen, (125, 255, 0, 255), ct_point, 4.0)
+
     # compute wheel position
     # the suspension is just this long
     suspension_fraction = wheel.suspension_length / (wheel.suspension_length + wheel.tire_radius)
     hub_start = wheel.fraction * suspension_fraction * wheel.normalFactor
+
+    
     
     hub_pos = [int(v1 * (1.0-hub_start) + v2 * hub_start) for (v1, v2) in zip(pos1, pos2)]
     # print(hub_pos)
@@ -407,6 +457,9 @@ mode = 0
 
 running = True
 
+step_mode = False
+step_forward = False
+
 last_tick = pygame.time.get_ticks() / 1000.0
 accum_dt = 0.0
 
@@ -417,6 +470,15 @@ while running:
         if event.type == QUIT or (event.type == KEYDOWN and event.key == K_ESCAPE):
             # The user closed the window or pressed escape
             running = False
+
+        if event.type == KEYUP and event.key == pygame.K_F1:
+            step_mode = not step_mode
+
+        if event.type == KEYUP and event.key == pygame.K_SPACE:
+            if step_mode:
+                step_forward = True
+            else:
+                step_mode = True
 
         if event.type == KEYDOWN and event.key == K_d:
             torque_mult -= 1
@@ -465,21 +527,24 @@ while running:
     last_tick = current_tick
 
     # print(f"delta: {delta:.2f}")
+    if (step_mode and step_forward) or not step_mode:
+        step_forward = False
 
-    for w in wheels:
-        w.update()
-
-    for w in wheels:
-        w.preSolve()
-
-    for i in range(10):
         for w in wheels:
-            w.solve()
-    # Make Box2D simulate the physics of our world for one step.
-    world.Step(TIME_STEP, 10, 10)
+            w.update()
 
-    for w in wheels:
-        w.updatePosition()
+        for w in wheels:
+            w.preSolve()
+
+        # print("solve_start--------------------------------------------------")
+        for i in range(10):
+            for w in wheels:
+                w.solve()
+        # Make Box2D simulate the physics of our world for one step.
+        world.Step(TIME_STEP, 10, 10)
+
+        for w in wheels:
+            w.updatePosition()
 
     # while accum_dt >= TIME_STEP:
     #     accum_dt -= TIME_STEP
@@ -498,12 +563,14 @@ while running:
     for w in wheels:
         my_draw_ray(w)
 
+    # draw step_mode
+
     # draw status of all wheel
-    pos_y = 10
-    pos_x = 10
+    pos_y = 22
+    pos_x = 4
     for (id, w) in enumerate(wheels):
-        draw_text(f"Wheel_{id} : angVel({w.angVel:.2f}), gnd_vel:({w.debug_ground_vel[0]:.2f}, {w.debug_ground_vel[1]:.2f}), Pn: {w.accumN:.2f}", (pos_x, pos_y))
-        pos_y += 20
+        draw_text(f"Wheel_{id} : last_ang_p {w.debug_last_angular_impulse:.2f}, max {w.debug_max_angular_impulse:.2f}, angVel({w.angVel:.2f}), gnd_vel:({w.debug_ground_vel[0]:.2f}, {w.debug_ground_vel[1]:.2f}), Pn: {w.accumN:.2f}, hub_vel: {w.debug_hub_vel[0]:.4f}, {w.debug_hub_vel[1]:.4f}, patch_vel: {w.debug_patch_vel:.4f}, last_p: {w.debug_last_impulse[0]:.2f}, {w.debug_last_impulse[1]:.2f}", (pos_x, pos_y))
+        pos_y += 16
 
     # Flip the screen and try to keep at the target FPS
     pygame.display.flip()
