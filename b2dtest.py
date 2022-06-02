@@ -66,7 +66,7 @@ class RayCallback(b2RayCastCallback):
         return fraction
 
 class Wheel:
-    def __init__(self, world, chassis, start, suspension_length, tire_radius, wheelMass=10.0, kSpring=900.0, cDamp=25.0, friction=0.9):
+    def __init__(self, world, chassis, start, suspension_length, tire_radius, wheelMass=10.0, kSpring=900.0, cDamp=50.0, friction=0.9):
         self.world = world
         self.chassis = chassis
         # self.callback = RayCallback(chassis)
@@ -130,13 +130,6 @@ class Wheel:
         self.normalFactor = 1.0
         # print(f"fraction: {self.fraction:.2f}")
 
-        # integrate velocity and position
-        self.angVel += self.torque * self.invInertia * TIME_STEP
-        self.rotation += self.angVel * TIME_STEP
-
-        # clear torque
-        self.torque = 0.0
-
         # clear accumulated Normal
         self.fSpring = 0.0
 
@@ -144,6 +137,14 @@ class Wheel:
             # print(f"Got Hit! pos: {self.callback.point}, norm: {self.callback.normal}")
             self.computeSpringForce()
 
+        # integrate velocity and position
+        self.angVel += self.torque * self.invInertia * TIME_STEP
+
+        # clear torque
+        self.torque = 0.0
+
+    def updatePosition(self):
+        self.rotation += self.angVel * TIME_STEP
     
     def hasContact(self):
         return self.callback.fixture != None and (self.callback.fraction < 1.0 and self.callback.fraction > 0.0)
@@ -209,9 +210,12 @@ class Wheel:
 
         maxPt = self.accumN * self.realFriction
         # print(f"maxPT: {maxPt:.2f}")
-        oldPt = self.accumT
-        self.accumT = clamp(oldPt + dPt, -maxPt, maxPt)
-        dPt = self.accumT - oldPt
+
+        dPt = clamp(dPt, -maxPt, maxPt)
+
+        # oldPt = self.accumT
+        # self.accumT = clamp(oldPt + dPt, -maxPt, maxPt)
+        # dPt = self.accumT - oldPt
 
         pt = b2Vec2(self.tangent) * dPt
 
@@ -262,9 +266,11 @@ class Wheel:
         b2.ApplyForce(-vSpring, ct_pos, True)
 
 # --- pygame setup ---
+pygame.font.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), 0, 32)
 pygame.display.set_caption('Simple pygame example')
 clock = pygame.time.Clock()
+default_font = pygame.font.SysFont('Arial', 20)
 
 # --- pybox2d world setup ---
 # Create the world
@@ -469,6 +475,10 @@ while running:
         for i in range(10):
             for w in wheels:
                 w.solve()
+
+        # update position
+        for w in wheels:
+            w.updatePosition()
 
     # wheel render
     for w in wheels:
