@@ -306,7 +306,7 @@ car_body = world.CreateDynamicBody(position=(5, 5), angle=0)
 car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=2.5, friction=0.3)
 
 front_wheel = Wheel(world, car_body, b2Vec2(1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS)
-rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, 0.8, 20)
+rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, 0.6, 15)
 
 wheels.append(front_wheel)
 wheels.append(rear_wheel)
