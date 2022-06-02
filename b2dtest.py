@@ -248,7 +248,7 @@ class Wheel:
 
         vt = b2Vec2.dot(dv, self.tangent)
 
-        print(f"target_vel: {vt}")
+        # print(f"target_vel: {vt}")
 
         dPt = self.massT * -vt
 
@@ -361,10 +361,10 @@ car_body = world.CreateDynamicBody(position=(5, 5), angle=0)
 car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=2.5, friction=0.3)
 
 front_wheel = Wheel(world, car_body, b2Vec2(1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 15.0, 1200, 250, 0.8)
-# rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 15.0, 1200, 250)
+rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS+0.2, 18.0, 1200, 250, 0.8)
 
 wheels.append(front_wheel)
-# wheels.append(rear_wheel)
+wheels.append(rear_wheel)
 
 # print(body)
 
@@ -410,8 +410,6 @@ def draw_wheel(pos, radius, rotation, color=(200, 0, 100, 255)):
     pygame.draw.line(screen, color, pos, line_end)
 
 def draw_contact(pos, normal):
-
-
     pygame.draw.line()
 
 def my_draw_ray(wheel):
@@ -449,10 +447,16 @@ def my_draw_ray(wheel):
 torque_mult = 0
 bump_chassis = 0
 
-modes = [{
-    'name': "Front Wheel Drive",
-    'wheel': front_wheel
-}]
+modes = [
+    {
+        'name': "Front Wheel Drive",
+        'wheel': front_wheel
+    },
+    {
+        'name': "Rear Wheel Drive",
+        'wheel': rear_wheel
+    },
+]
 mode = 0
 
 running = True
