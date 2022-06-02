@@ -79,7 +79,7 @@ class Wheel:
         self.kSpring = kSpring
 
         # wheel properties
-        self.friction = 0.9
+        self.friction = friction
         self.realFriction = 0.0 # updated on contact
         self.tire_radius = tire_radius
         self.mass = wheelMass
@@ -93,6 +93,10 @@ class Wheel:
 
         # for constraint resolution
         self.accumN = 0.0
+        self.accumT = 0.0
+
+        # for debug
+        self.debug_ground_vel = (0.0, 0.0)
 
     def applyTorque(self, t):
         self.torque += t
@@ -153,9 +157,11 @@ class Wheel:
         # compute appropriate data for solver
         self.accumT = 0.0
         self.massT = 0.0
-
+        self.realFriction = 0.0
         # compute mass?
         if self.hasContact():
+            self.realFriction = sqrt(self.friction * self.callback.fixture.friction)
+
             ct_pos = self.callback.point
             ct_norm = self.callback.normal
             b2 = self.callback.fixture.body
@@ -203,7 +209,10 @@ class Wheel:
         v1 = b2Vec2(self.getWorldVel(ct_point, ct_normal))
         v2 = b2.GetLinearVelocityFromWorldPoint(ct_point)
 
-        vt = b2Vec2.dot(v1-v2, self.tangent)
+        dv = v1-v2
+        self.debug_ground_vel = dv
+
+        vt = b2Vec2.dot(dv, self.tangent)
         # print(f"vel: {vt}")
 
         dPt = self.massT * -vt
@@ -244,8 +253,6 @@ class Wheel:
         # recompute normalFactor
         if scaleFactor > Box2D.b2_epsilon:
             self.normalFactor = 1.0 / scaleFactor
-
-        self.realFriction = sqrt(self.friction * self.callback.fixture.friction)
         # print(self.realFriction)
 
         # compute distance (dx)
@@ -271,6 +278,10 @@ screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), 0, 32)
 pygame.display.set_caption('Simple pygame example')
 clock = pygame.time.Clock()
 default_font = pygame.font.SysFont('Arial', 20)
+
+def draw_text(text, pos, color=(255,255,255), size=20):
+    img = default_font.render(text, True, color)
+    screen.blit(img, pos)
 
 # --- pybox2d world setup ---
 # Create the world
@@ -311,11 +322,11 @@ box = body.CreatePolygonFixture(box=(2, 1), density=1, friction=0.3)
 car_body = world.CreateDynamicBody(position=(5, 5), angle=0)
 car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=2.5, friction=0.3)
 
-front_wheel = Wheel(world, car_body, b2Vec2(1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS)
-rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, 0.6, 15)
+front_wheel = Wheel(world, car_body, b2Vec2(1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 15.0, 1200, 250, 0.8)
+# rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 15.0, 1200, 250)
 
 wheels.append(front_wheel)
-wheels.append(rear_wheel)
+# wheels.append(rear_wheel)
 
 # print(body)
 
@@ -391,9 +402,6 @@ bump_chassis = 0
 modes = [{
     'name': "Front Wheel Drive",
     'wheel': front_wheel
-}, {
-    'name': "Rear Wheel Drive",
-    'wheel': rear_wheel
 }]
 mode = 0
 
@@ -431,7 +439,7 @@ while running:
     
     # tire.ApplyTorque(torque_mult * 5.0, True)
     w = modes[mode]['wheel']
-    t = torque_mult * 150.0
+    t = torque_mult * 450.0
     w.applyTorque(t)
     car_body.ApplyLinearImpulse(b2Vec2(bump_chassis * 100.0, 0.0), car_body.position, True)
 
@@ -450,9 +458,6 @@ while running:
     # print(f"mouse: {mx}, {my}")
     pygame.draw.circle(screen, (127, 0, 0, 255), (int(mx), int(my)), 20.0)
 
-    # Make Box2D simulate the physics of our world for one step.
-    world.Step(TIME_STEP, 10, 10)
-
     # wheel sim
     current_tick = pygame.time.get_ticks() / 1000.0
     delta = current_tick - last_tick
@@ -461,28 +466,44 @@ while running:
 
     # print(f"delta: {delta:.2f}")
 
-    while accum_dt >= TIME_STEP:
-        accum_dt -= TIME_STEP
-        
+    for w in wheels:
+        w.update()
+
+    for w in wheels:
+        w.preSolve()
+
+    for i in range(10):
         for w in wheels:
-            w.update()
+            w.solve()
+    # Make Box2D simulate the physics of our world for one step.
+    world.Step(TIME_STEP, 10, 10)
+
+    for w in wheels:
+        w.updatePosition()
+
+    # while accum_dt >= TIME_STEP:
+    #     accum_dt -= TIME_STEP
+        
+        
 
         # pre solve?
-        for w in wheels:
-            w.preSolve()
+        
 
         # solve it
-        for i in range(10):
-            for w in wheels:
-                w.solve()
 
         # update position
-        for w in wheels:
-            w.updatePosition()
+        
 
     # wheel render
     for w in wheels:
         my_draw_ray(w)
+
+    # draw status of all wheel
+    pos_y = 10
+    pos_x = 10
+    for (id, w) in enumerate(wheels):
+        draw_text(f"Wheel_{id} : angVel({w.angVel:.2f}), gnd_vel:({w.debug_ground_vel[0]:.2f}, {w.debug_ground_vel[1]:.2f}), Pn: {w.accumN:.2f}", (pos_x, pos_y))
+        pos_y += 20
 
     # Flip the screen and try to keep at the target FPS
     pygame.display.flip()
