@@ -436,11 +436,17 @@ def my_draw_ray(wheel):
     suspension_fraction = wheel.suspension_length / (wheel.suspension_length + wheel.tire_radius)
     hub_start = wheel.fraction * suspension_fraction * wheel.normalFactor
 
+    suspension_dir = (b2Vec2(pos1) - b2Vec2(pos2))
+    suspension_dir = suspension_dir / suspension_dir.length
+    # print(sus)
     
+    hub_pos = b2Vec2(ct_point) + (suspension_dir * wheel.tire_radius * wheel.normalFactor * PPM)
+
+    # print(f"NF: {wheel.normalFactor:.2f}")    
     
-    hub_pos = [int(v1 * (1.0-hub_start) + v2 * hub_start) for (v1, v2) in zip(pos1, pos2)]
+    # hub_pos = [int(v1 * (1.0-hub_start) + v2 * hub_start) for (v1, v2) in zip(pos1, pos2)]
     # print(hub_pos)
-    draw_wheel(hub_pos, wheel.tire_radius * PPM, wheel.rotation)
+    draw_wheel([int(x) for x in hub_pos], wheel.tire_radius * PPM, wheel.rotation)
 
 # --- main game loop ---
 
