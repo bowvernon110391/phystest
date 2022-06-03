@@ -416,6 +416,10 @@ def my_draw_ray(wheel):
     if not hasattr(wheel, 'ray_start') or not hasattr(wheel, 'ray_end'):
         return
 
+    # refresh ray start
+    wheel.ray_start = wheel.chassis.GetWorldPoint(wheel.start)
+    wheel.ray_end = wheel.chassis.GetWorldPoint(wheel.end)
+
     # draw here
     pos1 = (wheel.ray_start.x * PPM, SCREEN_HEIGHT - wheel.ray_start.y * PPM)
     pos2 = (wheel.ray_end.x * PPM, SCREEN_HEIGHT - wheel.ray_end.y * PPM)
