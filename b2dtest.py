@@ -14,7 +14,7 @@ And some drawing code that extends the shape classes.
 
 kne
 """
-from math import sin,cos, sqrt
+from math import radians, sin,cos, sqrt
 import pygame
 from pygame.locals import (QUIT, KEYDOWN, K_ESCAPE, KEYUP, K_a, K_d)
 
@@ -33,6 +33,8 @@ SCREEN_WIDTH, SCREEN_HEIGHT = 1024, 600
 
 TIRE_RADIUS = 0.5
 SUSPENSION_LENGTH = 1.75
+STATIC_TORQUE = 7200
+BUMP_IMPULSE = 1500
 
 # helper
 def cross(v):
@@ -66,7 +68,7 @@ class RayCallback(b2RayCastCallback):
         return fraction
 
 class Wheel:
-    def __init__(self, world, chassis, start, suspension_length, tire_radius, wheelMass=10.0, kSpring=900.0, cDamp=50.0, friction=0.9):
+    def __init__(self, world, chassis, start, suspension_length, tire_radius, wheelMass=24.0, kSpring=900.0, cDamp=50.0, friction=0.9):
         self.world = world
         self.chassis = chassis
         # self.callback = RayCallback(chassis)
@@ -336,34 +338,48 @@ ground_body = world.CreateStaticBody(
 )
 ground_body.fixtures[0].friction=1.0
 
+ground_body = world.CreateStaticBody(
+    position=(40, 0),
+    angle=radians(20),
+    shapes=polygonShape(box=(50, 1))
+)
+ground_body.fixtures[0].friction=0.5
+
+ground_body = world.CreateStaticBody(
+    position=(10, 0),
+    angle=radians(-20),
+    shapes=polygonShape(box=(50, 1))
+)
+ground_body.fixtures[0].friction=0.4
+
 # Create a couple dynamic bodies
-body = world.CreateDynamicBody(position=(1, 15))
-circle = body.CreateCircleFixture(radius=0.5, density=1, friction=0.9)
-circle.filterData.groupIndex=-2
+body = world.CreateDynamicBody(position=(2, 15))
+circle = body.CreateCircleFixture(radius=0.5, density=100, friction=0.9)
+# circle.filterData.groupIndex=-2
 # body.ApplyLinearImpulse(Box2D.b2Vec2(5, 0), body.transform * Box2D.b2Vec2_zero, True)
-body.linearVelocity = Box2D.b2Vec2(10.0, -15.0)
+# body.linearVelocity = Box2D.b2Vec2(10.0, -15.0)
 
 tire = body
 # print(circle)
 
 # second tire (slippery)
 body = world.CreateDynamicBody(position=(1, 15))
-circle2 = body.CreateCircleFixture(radius=0.5, density=1, friction=0.0)
-circle2.filterData.groupIndex=-2
-body.linearVelocity = Box2D.b2Vec2(10.0, -15.0)
+circle2 = body.CreateCircleFixture(radius=0.5, density=50, friction=0.2)
+# circle2.filterData.groupIndex=-2
+# body.linearVelocity = Box2D.b2Vec2(10.0, -15.0)
 
 tire2 = body
 
 # a box angled
-body = world.CreateDynamicBody(position=(30, 45), angle=15)
-box = body.CreatePolygonFixture(box=(2, 1), density=1, friction=0.3)
+# body = world.CreateDynamicBody(position=(30, 45), angle=15)
+# box = body.CreatePolygonFixture(box=(2, 1), density=110, friction=0.3)
 
 # a bigger box on the left
 car_body = world.CreateDynamicBody(position=(5, 5), angle=0)
-car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=2.5, friction=0.3)
+car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=80.5, friction=0.3)
 
-front_wheel = Wheel(world, car_body, b2Vec2(1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 15.0, 1200, 250, 0.8)
-rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS+0.2, 18.0, 1200, 250, 0.8)
+front_wheel = Wheel(world, car_body, b2Vec2(1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 25.0, 95000, 9500, 0.8)
+rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS+0.2, 28.0, 95000, 9500, 0.8)
 
 wheels.append(front_wheel)
 wheels.append(rear_wheel)
@@ -436,17 +452,22 @@ def my_draw_ray(wheel):
 
     # contact point
     pygame.draw.circle(screen, (125, 255, 0, 255), ct_point, 4.0)
+    # contact normal
+    if wheel.hasContact():
+        ct_normal = (wheel.callback.normal[0] * PPM, -wheel.callback.normal[1] * PPM)
+        pygame.draw.line(screen, (180, 200, 0, 255), ct_point, [x+y for (x,y) in zip(ct_point, ct_normal)])
 
     # compute wheel position
     # the suspension is just this long
     suspension_fraction = wheel.suspension_length / (wheel.suspension_length + wheel.tire_radius)
-    hub_start = wheel.fraction * suspension_fraction * wheel.normalFactor
-
+    
     suspension_dir = (b2Vec2(pos1) - b2Vec2(pos2))
     suspension_dir = suspension_dir / suspension_dir.length
     # print(sus)
+
+    normal_factor = wheel.normalFactor if wheel.normalFactor < 1.414 else 1.414
     
-    hub_pos = b2Vec2(ct_point) + (suspension_dir * wheel.tire_radius * wheel.normalFactor * PPM)
+    hub_pos = b2Vec2(ct_point) + (suspension_dir * wheel.tire_radius * normal_factor * PPM)
 
     # print(f"NF: {wheel.normalFactor:.2f}")    
     
@@ -508,8 +529,10 @@ while running:
 
         if event.type == KEYDOWN and event.key == pygame.K_s:
             rear_wheel.handbrake(True)
+            # front_wheel.handbrake(True)
         if event.type == KEYUP and event.key == pygame.K_s:
             rear_wheel.handbrake(False) 
+            # front_wheel.handbrake(False)
 
         if event.type == KEYDOWN and event.key == pygame.K_RIGHT:
             bump_chassis += 1
@@ -522,9 +545,9 @@ while running:
     
     # tire.ApplyTorque(torque_mult * 5.0, True)
     w = modes[mode]['wheel']
-    t = torque_mult * 450.0
+    t = torque_mult * STATIC_TORQUE
     w.applyTorque(t)
-    car_body.ApplyLinearImpulse(b2Vec2(bump_chassis * 100.0, 0.0), car_body.position, True)
+    car_body.ApplyLinearImpulse(b2Vec2(bump_chassis * BUMP_IMPULSE, 0.0), car_body.position, True)
 
     pygame.display.set_caption(f"Mode: {modes[mode]['name']}, Torque: {t:.2f} Nm")
 
@@ -589,8 +612,10 @@ while running:
     # draw status of all wheel
     pos_y = 22
     pos_x = 4
+
+    draw_text(f"chassis: mass {car_body.mass:.2f}", (pos_x, 4))
     for (id, w) in enumerate(wheels):
-        draw_text(f"Wheel_{id} : last_ang_p {w.debug_last_angular_impulse:.2f}, max {w.debug_max_angular_impulse:.2f}, angVel({w.angVel:.2f}), gnd_vel:({w.debug_ground_vel[0]:.2f}, {w.debug_ground_vel[1]:.2f}), Pn: {w.accumN:.2f}, hub_vel: {w.debug_hub_vel[0]:.4f}, {w.debug_hub_vel[1]:.4f}, patch_vel: {w.debug_patch_vel:.4f}, last_p: {w.debug_last_impulse[0]:.2f}, {w.debug_last_impulse[1]:.2f}", (pos_x, pos_y))
+        draw_text(f"Wheel_{id} : last_ang_p {w.debug_last_angular_impulse:.2f}, max {w.debug_max_angular_impulse:.2f}, angVel({w.angVel:.2f}), gnd_vel:({w.debug_ground_vel[0]:.2f}, {w.debug_ground_vel[1]:.2f}), W: {w.fSpring:.2f}, hub_vel: {w.debug_hub_vel[0]:.4f}, {w.debug_hub_vel[1]:.4f}, patch_vel: {w.debug_patch_vel:.4f}, last_p: {w.debug_last_impulse[0]:.2f}, {w.debug_last_impulse[1]:.2f}", (pos_x, pos_y))
         pos_y += 16
 
     # Flip the screen and try to keep at the target FPS
