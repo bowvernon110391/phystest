@@ -87,6 +87,9 @@ class Wheel:
         self.inertia = 0.5 * wheelMass * tire_radius ** 2
         self.invInertia = 1.0 / self.inertia
 
+        # store real inertia, so it can be restored later
+        self.realInvInertia = self.invInertia
+
         self.rotation = 0.0 # in radians
         self.angVel = 0.0 # in rad/sec
         self.old_angular_vel = 0.0  # for constraint solver
@@ -105,6 +108,10 @@ class Wheel:
         self.debug_last_angular_impulse = 0.0
         self.debug_max_angular_impulse = 0.0
 
+    def handbrake(self, activate=True):
+        self.invInertia = 0.0 if activate else self.realInvInertia
+        self.angVel = 0.0 if activate else self.angVel
+
     def applyTorque(self, t):
         self.torque += t
 
@@ -120,15 +127,10 @@ class Wheel:
         angularImpulse = b2Vec2.dot(p, tangent)
         # print(f"angular_impulse: {angularImpulse:.2f}")
 
-        # compute proportion of impulse felt by the tire
-        # total_inertia = self.invInertia + (1.0 / self.chassis.inertia)
-        # proportion = self.invInertia / total_inertia
-
-        self.debug_max_angular_impulse = -self.angVel / self.invInertia
-
-        max_angular_impulse = abs(self.debug_max_angular_impulse)
-
-        # angularImpulse = clamp(angularImpulse, -max_angular_impulse, max_angular_impulse)
+        if self.invInertia > 0.0:
+            self.debug_max_angular_impulse = -self.angVel / self.invInertia
+        else:
+            self.debug_max_angular_impulse = 0.0
 
         self.angVel += self.invInertia * angularImpulse
 
@@ -503,6 +505,11 @@ while running:
             torque_mult += 1
         if event.type == KEYUP and event.key == K_a:
             torque_mult -= 1
+
+        if event.type == KEYDOWN and event.key == pygame.K_s:
+            rear_wheel.handbrake(True)
+        if event.type == KEYUP and event.key == pygame.K_s:
+            rear_wheel.handbrake(False) 
 
         if event.type == KEYDOWN and event.key == pygame.K_RIGHT:
             bump_chassis += 1
