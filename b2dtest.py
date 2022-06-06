@@ -35,6 +35,7 @@ TIRE_RADIUS = 0.5
 SUSPENSION_LENGTH = 1.75
 STATIC_TORQUE = 7200
 BUMP_IMPULSE = 1500
+ACCUMULATE = True
 
 # helper
 def cross(v):
@@ -79,6 +80,7 @@ class Wheel:
 
         self.cDamp = cDamp
         self.kSpring = kSpring
+        self.lastGroundObject = None
 
         # wheel properties
         self.friction = friction
@@ -164,8 +166,19 @@ class Wheel:
         self.fSpring = 0.0
 
         if self.hasContact():
+            # if the last ground object is different, empty accumulator
+            groundObject = self.callback.fixture.body
+            if groundObject != self.lastGroundObject:
+                print("Different ground!")
+                self.lastGroundObject = groundObject
+                self.accumT = 0.0
+                self.accumN = 0.0
             # print(f"Got Hit! pos: {self.callback.point}, norm: {self.callback.normal}")
             self.computeSpringForce()
+        else:
+            # no contact? clear accumulator
+            self.accumT = 0.0
+            self.accumN = 0.0
 
         # integrate velocity and position
         self.old_angular_vel = self.angVel
@@ -183,7 +196,7 @@ class Wheel:
 
     def preSolve(self):
         # compute appropriate data for solver
-        self.accumT = 0.0
+        # self.accumT = 0.0
         self.massT = 0.0
         self.realFriction = 0.0
 
@@ -231,6 +244,23 @@ class Wheel:
             if total_mass > 0.0:
                 self.massT = 1.0 / total_mass
 
+            # apply old impulse
+            if ACCUMULATE:
+                # b1 = self.chassis
+                b2 = self.lastGroundObject
+
+                ct_point = self.callback.point
+                ct_normal = self.callback.normal
+                
+                # where's the direction?
+                pt = b2Vec2(self.tangent) * self.accumT
+
+                self.applyImpulse(pt, ct_point, ct_normal)
+                b2.ApplyLinearImpulse(-pt, ct_point, True)  
+
+                # print(f"accumT: {self.accumT:.2f}")
+
+
         # print(f"massT: {self.massT:.4f}")
 
         # print(f"massT: {self.massT:.2f}, norm_imp: {self.accumN:.2f}, friction: {self.realFriction:.2f}")
@@ -255,15 +285,18 @@ class Wheel:
         # print(f"target_vel: {vt}")
 
         dPt = self.massT * -vt
-
-        maxPt = self.accumN * self.realFriction
         # print(f"maxPT: {maxPt:.2f}")
 
-        dPt = clamp(dPt, -maxPt, maxPt)
-
-        # oldPt = self.accumT
-        # self.accumT = clamp(oldPt + dPt, -maxPt, maxPt)
-        # dPt = self.accumT - oldPt
+        if not ACCUMULATE:
+            maxPt = self.accumN * self.realFriction
+            # not using accumulator, just simple clamp
+            dPt = clamp(dPt, -maxPt, maxPt)
+        else:
+            maxPt = self.accumN / TIME_STEP * self.realFriction
+            # otherwise, clamp the final impulse
+            oldPt = self.accumT
+            self.accumT = clamp(oldPt + dPt, -maxPt, maxPt)
+            dPt = self.accumT - oldPt
 
         pt = b2Vec2(self.tangent) * dPt
 
@@ -541,6 +574,9 @@ while running:
 
         if event.type == KEYUP and event.key == pygame.K_m:
             mode = (mode + 1) & 1
+
+        if event.type == KEYUP and event.key == pygame.K_F2:
+            ACCUMULATE = not ACCUMULATE
             
     
     # tire.ApplyTorque(torque_mult * 5.0, True)
@@ -584,11 +620,12 @@ while running:
         for i in range(10):
             for w in wheels:
                 w.solve()
-        # Make Box2D simulate the physics of our world for one step.
-        world.Step(TIME_STEP, 10, 10)
 
         for w in wheels:
             w.updatePosition()
+
+        # Make Box2D simulate the physics of our world for one step.
+        world.Step(TIME_STEP, 10, 10)
 
     # while accum_dt >= TIME_STEP:
     #     accum_dt -= TIME_STEP
@@ -613,7 +650,8 @@ while running:
     pos_y = 22
     pos_x = 4
 
-    draw_text(f"chassis: mass {car_body.mass:.2f}", (pos_x, 4))
+    accumtext = 'ON' if ACCUMULATE else 'OFF'
+    draw_text(f"chassis: mass {car_body.mass:.2f}, ACCUMULATE: {accumtext}", (pos_x, 4))
     for (id, w) in enumerate(wheels):
         draw_text(f"Wheel_{id} : last_ang_p {w.debug_last_angular_impulse:.2f}, max {w.debug_max_angular_impulse:.2f}, angVel({w.angVel:.2f}), gnd_vel:({w.debug_ground_vel[0]:.2f}, {w.debug_ground_vel[1]:.2f}), W: {w.fSpring:.2f}, hub_vel: {w.debug_hub_vel[0]:.4f}, {w.debug_hub_vel[1]:.4f}, patch_vel: {w.debug_patch_vel:.4f}, last_p: {w.debug_last_impulse[0]:.2f}, {w.debug_last_impulse[1]:.2f}", (pos_x, pos_y))
         pos_y += 16
