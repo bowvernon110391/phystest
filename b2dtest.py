@@ -35,7 +35,8 @@ TIRE_RADIUS = 0.5
 SUSPENSION_LENGTH = 1.75
 STATIC_TORQUE = 7200
 BUMP_IMPULSE = 1500
-ACCUMULATE = True
+ACCUMULATE = True   # use accumulation of impulse to converge faster
+SLOP = 0.02 # 2 cm slop
 
 # helper
 def cross(v):
@@ -331,7 +332,7 @@ class Wheel:
         # print(self.realFriction)
 
         # compute distance (dx)
-        dx = (1.0 - self.callback.fraction) * self.suspension_length
+        dx = (1.0 - self.callback.fraction) * self.suspension_length - SLOP
 
         fSpring = self.kSpring * dx * scaleFactor
         fDamp = self.cDamp * b2Vec2.dot(v, ct_norm)
