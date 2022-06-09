@@ -360,6 +360,44 @@ class Wheel(Updatable, Joint):
         self.chassis.ApplyForce(vSpring, ct_pos, True)
         b2.ApplyForce(-vSpring, ct_pos, True)
 
+class Coupling(Joint):
+    def __init__(self, w1:Wheel, w2:Wheel):
+        self.w1 = w1
+        self.w2 = w2
+
+        self.active = True
+
+        self.mass = 0.0
+        self.accumulation = 0.0
+
+    def preSolve(self):
+        if not self.active:
+            return
+
+        self.mass = self.w1.invMass + self.w2.invMass
+        if self.w1.invInertia > 0.0:
+            self.mass += self.w1.invInertia * self.w1.tire_radius * self.w1.tire_radius
+        if self.w2.invInertia > 0.0:
+            self.mass += self.w2.invInertia * self.w2.tire_radius * self.w2.tire_radius
+
+        if self.mass > 0.0:
+            self.mass = 1.0 / self.mass
+
+    def solve(self):
+        if not self.active:
+            return
+        # compute delta v
+        v1 = self.w1.angVel * self.w1.tire_radius
+        v2 = self.w2.angVel * self.w2.tire_radius
+
+        # flip sign
+        dv = v2-v1
+        p = self.mass * dv
+
+        # apply impulse
+        self.w1.angVel += self.w1.invInertia * p
+        self.w2.angVel += self.w2.invInertia * -p
+
 # --- pygame setup ---
 pygame.font.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), 0, 32)
@@ -442,7 +480,9 @@ rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_
 addWheel(front_wheel)
 addWheel(rear_wheel)
 
+coupler = Coupling(front_wheel, rear_wheel)
 # print(body)
+joints.append(coupler)
 
 colors = {
     staticBody: (255, 255, 255, 255),
@@ -602,6 +642,9 @@ while running:
 
         if event.type == KEYUP and event.key == pygame.K_F2:
             ACCUMULATE = not ACCUMULATE
+
+        if event.type == KEYUP and event.key == pygame.K_c:
+            coupler.active = not coupler.active
             
     
     # tire.ApplyTorque(torque_mult * 5.0, True)
@@ -682,7 +725,8 @@ while running:
     pos_x = 4
 
     accumtext = 'ON' if ACCUMULATE else 'OFF'
-    draw_text(f"chassis: mass {car_body.mass:.2f}, ACCUMULATE: {accumtext}", (pos_x, 4))
+    couplertext = 'ON' if coupler.active else 'OFF'
+    draw_text(f"chassis: mass {car_body.mass:.2f}, ACCUMULATE: {accumtext}, AWD: {couplertext}", (pos_x, 4))
     for (id, w) in enumerate(wheels):
         draw_text(f"Wheel_{id} : last_ang_p {w.debug_last_angular_impulse:.2f}, max {w.debug_max_angular_impulse:.2f}, angVel({w.angVel:.2f}), gnd_vel:({w.debug_ground_vel[0]:.2f}, {w.debug_ground_vel[1]:.2f}), W: {w.fSpring:.2f}, hub_vel: {w.debug_hub_vel[0]:.4f}, {w.debug_hub_vel[1]:.4f}, patch_vel: {w.debug_patch_vel:.4f}, last_p: {w.debug_last_impulse[0]:.2f}, {w.debug_last_impulse[1]:.2f}", (pos_x, pos_y))
         pos_y += 16
