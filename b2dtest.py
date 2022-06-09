@@ -45,6 +45,18 @@ def cross(v):
 def clamp(v, vmin, vmax):
     return min(max(v, vmin), vmax)
 
+# abstract joint
+class Joint:
+    def solve(self):
+        pass
+
+    def preSolve(self):
+        pass
+
+class Updatable:
+    def update(self):
+        pass
+
 # custom callback
 class RayCallback(b2RayCastCallback):
     def __init__(self, chassis):
@@ -69,7 +81,7 @@ class RayCallback(b2RayCastCallback):
         # print(fraction)
         return fraction
 
-class Wheel:
+class Wheel(Updatable, Joint):
     def __init__(self, world, chassis, start, suspension_length, tire_radius, wheelMass=24.0, kSpring=900.0, cDamp=50.0, friction=0.9):
         self.world = world
         self.chassis = chassis
@@ -365,6 +377,16 @@ world = world(gravity=(0, -10), doSleep=True)
 
 wheels = []
 
+# updatables
+updatables = []
+# joints
+joints = []
+
+def addWheel(w):
+    updatables.append(w)
+    joints.append(w)
+    wheels.append(w)
+
 # And a static body to hold the ground shape
 ground_body = world.CreateStaticBody(
     position=(0, 0),
@@ -415,8 +437,10 @@ car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=80.5, frictio
 front_wheel = Wheel(world, car_body, b2Vec2(1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 25.0, 95000, 9500, 0.8)
 rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS+0.2, 28.0, 95000, 9500, 0.8)
 
-wheels.append(front_wheel)
-wheels.append(rear_wheel)
+# wheels.append(front_wheel)
+# wheels.append(rear_wheel)
+addWheel(front_wheel)
+addWheel(rear_wheel)
 
 # print(body)
 
@@ -611,16 +635,22 @@ while running:
     if (step_mode and step_forward) or not step_mode:
         step_forward = False
 
-        for w in wheels:
-            w.update()
+        # for w in wheels:
+        #     w.update()
+        for u in updatables:
+            u.update()
 
-        for w in wheels:
-            w.preSolve()
+        # for w in wheels:
+        #     w.preSolve()
+        for j in joints:
+            j.preSolve()
 
         # print("solve_start--------------------------------------------------")
         for i in range(10):
-            for w in wheels:
-                w.solve()
+            # for w in wheels:
+            #     w.solve()
+            for j in joints:
+                j.solve()
 
         for w in wheels:
             w.updatePosition()
