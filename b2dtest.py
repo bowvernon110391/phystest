@@ -360,6 +360,8 @@ class Wheel(Updatable, Joint):
         self.chassis.ApplyForce(vSpring, ct_pos, True)
         b2.ApplyForce(-vSpring, ct_pos, True)
 
+# this is like a tank tracks. force both wheels to 
+# run at same linear velocity (different angular velocity tho)
 class Coupling(Joint):
     def __init__(self, w1:Wheel, w2:Wheel):
         self.w1 = w1
@@ -398,6 +400,72 @@ class Coupling(Joint):
         self.w1.angVel += self.w1.invInertia * p
         self.w2.angVel += self.w2.invInertia * -p
 
+# Differential. Represented as updatable joint
+class Differential(Updatable, Joint):
+    def __init__(self, w1:Wheel, w2:Wheel):
+        # keep tracks of our angular velocity
+        self.angVel = 0.0
+        # combined inertia of both wheels
+        self.w1 = w1
+        self.w2 = w2
+        self.invInertia = 0.0   # will be updated later
+        self.torque = 0.0
+        self.massT = 0.0 # the constraint mass
+        self.active = True
+
+    def applyTorque(self, t):
+        self.torque += t
+
+    # this is because the wheel could be locked which will have infinite inertia
+    def updateInertia(self):
+        if not self.active:
+            return
+
+        total_inertia = 0.0
+        self.invInertia = 0.0   # assume infinite inertia
+        wheels = [self.w1, self.w2]
+
+        for w in wheels:
+            if w.invInertia > 0.0:
+                total_inertia += 1.0 / w.invInertia
+
+        if total_inertia > 0.0:
+            self.invInertia = 1.0 / total_inertia
+
+    def update(self):
+        if not self.active:
+            return
+        # recompute inertia just in case
+        self.updateInertia()
+        # update angular velocity
+        self.angVel += self.invInertia * self.torque * TIME_STEP
+        # zero out torque
+        self.torque = 0.0
+
+    def preSolve(self):
+        if not self.active:
+            return
+        self.massT = self.w1.invInertia + self.w2.invInertia
+        if self.massT > 0.0:
+            self.massT = 1.0 / self.massT
+        else:
+            self.massT = 0.0
+
+    def solve(self):
+        if not self.active:
+            return
+        # compute the delta velocity
+        curr_w = 0.5 * (self.w1.angVel + self.w2.angVel)
+        dw = curr_w - self.angVel
+
+        pt = self.massT * dw
+        # apply to both wheels
+        self.w1.angVel += self.w1.invInertia * -pt
+        self.w2.angVel += self.w2.invInertia * -pt
+
+        # apply to self
+        self.angVel += self.invInertia * pt
+
 # --- pygame setup ---
 pygame.font.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), 0, 32)
@@ -420,10 +488,14 @@ updatables = []
 # joints
 joints = []
 
-def addWheel(w):
+def addWheel(w:Wheel):
     updatables.append(w)
     joints.append(w)
     wheels.append(w)
+
+def addDifferential(d:Differential):
+    updatables.append(d)
+    joints.append(d)
 
 # And a static body to hold the ground shape
 ground_body = world.CreateStaticBody(
@@ -480,7 +552,13 @@ rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_
 addWheel(front_wheel)
 addWheel(rear_wheel)
 
+diff = Differential(front_wheel, rear_wheel)
+diff.active = False
+
+addDifferential(diff)
+
 coupler = Coupling(front_wheel, rear_wheel)
+coupler.active = False
 # print(body)
 joints.append(coupler)
 
@@ -581,12 +659,20 @@ bump_chassis = 0
 modes = [
     {
         'name': "Front Wheel Drive",
-        'wheel': front_wheel
+        'wheel': front_wheel,
     },
     {
         'name': "Rear Wheel Drive",
         'wheel': rear_wheel
     },
+    {
+        'name': "Four Wheel Drive (locked diff)",
+        'wheel': rear_wheel
+    },
+    {
+        'name': "AWD with open differential",
+        'wheel': diff
+    }
 ]
 mode = 0
 
@@ -599,7 +685,11 @@ last_tick = pygame.time.get_ticks() / 1000.0
 accum_dt = 0.0
 
 while running:
+    # clear forces
     bump_chassis = 0
+    # activate/deactivate shit depending on mode
+    coupler.active = True if mode == 2 else False
+    diff.active = True if mode == 3 else False
     # Check the event queue
     for event in pygame.event.get():
         if event.type == QUIT or (event.type == KEYDOWN and event.key == K_ESCAPE):
@@ -638,7 +728,7 @@ while running:
             bump_chassis -= 1
 
         if event.type == KEYUP and event.key == pygame.K_m:
-            mode = (mode + 1) & 1
+            mode = (mode + 1) % len(modes)
 
         if event.type == KEYUP and event.key == pygame.K_F2:
             ACCUMULATE = not ACCUMULATE
@@ -650,6 +740,8 @@ while running:
     # tire.ApplyTorque(torque_mult * 5.0, True)
     w = modes[mode]['wheel']
     t = torque_mult * STATIC_TORQUE
+    # apply to wheel or the differential
+    # w.applyTorque(t)
     w.applyTorque(t)
     car_body.ApplyLinearImpulse(b2Vec2(bump_chassis * BUMP_IMPULSE, 0.0), car_body.position, True)
 
@@ -725,11 +817,13 @@ while running:
     pos_x = 4
 
     accumtext = 'ON' if ACCUMULATE else 'OFF'
-    couplertext = 'ON' if coupler.active else 'OFF'
-    draw_text(f"chassis: mass {car_body.mass:.2f}, ACCUMULATE: {accumtext}, AWD: {couplertext}", (pos_x, 4))
+    draw_text(f"chassis: mass {car_body.mass:.2f}, ACCUMULATE: {accumtext}", (pos_x, 4))
     for (id, w) in enumerate(wheels):
         draw_text(f"Wheel_{id} : last_ang_p {w.debug_last_angular_impulse:.2f}, max {w.debug_max_angular_impulse:.2f}, angVel({w.angVel:.2f}), gnd_vel:({w.debug_ground_vel[0]:.2f}, {w.debug_ground_vel[1]:.2f}), W: {w.fSpring:.2f}, hub_vel: {w.debug_hub_vel[0]:.4f}, {w.debug_hub_vel[1]:.4f}, patch_vel: {w.debug_patch_vel:.4f}, last_p: {w.debug_last_impulse[0]:.2f}, {w.debug_last_impulse[1]:.2f}", (pos_x, pos_y))
         pos_y += 16
+
+    if mode == 3:
+        draw_text(f"diff: w({diff.angVel:.2f}), invInertia({diff.invInertia:.2f})", (pos_x, pos_y))
 
     # Flip the screen and try to keep at the target FPS
     pygame.display.flip()
