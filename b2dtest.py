@@ -410,7 +410,7 @@ class Differential(Updatable, Joint):
         # combined inertia of both wheels
         self.w1 = w1
         self.w2 = w2
-        self.invInertia = 0.0   # will be updated later
+        self.invInertia = 1.0 / (1.0/w1.invInertia + 1.0/w2.invInertia)
         self.torque = 0.0
         self.massT = 0.0 # the constraint mass
         self.active = True
@@ -422,26 +422,26 @@ class Differential(Updatable, Joint):
         self.torque += t
 
     # this is because the wheel could be locked which will have infinite inertia
-    def updateInertia(self):
-        if not self.active:
-            return
+    # def updateInertia(self):
+    #     if not self.active:
+    #         return
 
-        total_inertia = 0.0
-        self.invInertia = 0.0   # assume infinite inertia
-        wheels = [self.w1, self.w2]
+    #     total_inertia = 0.0
+    #     self.invInertia = 0.0   # assume infinite inertia
+    #     wheels = [self.w1, self.w2]
 
-        for w in wheels:
-            if w.invInertia > 0.0:
-                total_inertia += 1.0 / w.invInertia
+    #     for w in wheels:
+    #         if w.invInertia > 0.0:
+    #             total_inertia += 1.0 / w.invInertia
 
-        if total_inertia > 0.0:
-            self.invInertia = 1.0 / total_inertia
+    #     if total_inertia > 0.0:
+    #         self.invInertia = 1.0 / total_inertia
 
     def update(self):
         if not self.active:
             return
         # recompute inertia just in case
-        self.updateInertia()
+        # self.updateInertia()
         # update angular velocity
         self.angVel += self.invInertia * self.torque * TIME_STEP
         # zero out torque
@@ -450,7 +450,7 @@ class Differential(Updatable, Joint):
     def preSolve(self):
         if not self.active:
             return
-        self.massT = self.w1.invInertia + self.w2.invInertia
+        self.massT = 4.0 * self.invInertia + self.w1.invInertia + self.w2.invInertia
         if self.massT > 0.0:
             self.massT = 1.0 / self.massT
         else:
@@ -459,17 +459,20 @@ class Differential(Updatable, Joint):
     def solve(self):
         if not self.active:
             return
-        # compute the delta velocity
-        curr_w = 0.5 * (self.w1.angVel + self.w2.angVel)
-        dw = curr_w - self.angVel
+        
+        dv = 2.0 * self.angVel - self.w1.angVel - self.w2.angVel
 
-        pt = self.massT * dw
-        # apply to both wheels
-        self.w1.angVel += self.w1.invInertia * -pt
-        self.w2.angVel += self.w2.invInertia * -pt
+        lmb = -self.massT * dv
 
-        # apply to self
-        self.angVel += self.invInertia * pt
+        # compute impulse
+        ptSelf = 2 * lmb
+        ptW1 = -lmb
+        ptW2 = -lmb
+
+        # apply impulse
+        self.angVel += self.invInertia * ptSelf
+        self.w1.angVel += self.w1.invInertia * ptW1
+        self.w2.angVel += self.w2.invInertia * ptW2
 
 class SpeedSensitiveLSD(Differential):
     def __init__(self, w1: Wheel, w2: Wheel, max_slip: float):
@@ -576,7 +579,7 @@ car_body = world.CreateDynamicBody(position=(5, 5), angle=0)
 car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=80.5, friction=0.3)
 
 front_wheel = Wheel(world, car_body, b2Vec2(1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 25.0, 95000, 9500, 0.8)
-rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS+0.2, 25.0, 95000, 9500, 0.8)
+rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 25.0, 95000, 9500, 0.8)
 
 # wheels.append(front_wheel)
 # wheels.append(rear_wheel)
