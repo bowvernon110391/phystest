@@ -362,7 +362,7 @@ class Wheel(Updatable, Joint):
 
 # this is like a tank tracks. force both wheels to 
 # run at same linear velocity (different angular velocity tho)
-class Coupling(Joint):
+class WheelTrack(Joint):
     def __init__(self, w1:Wheel, w2:Wheel):
         self.w1 = w1
         self.w2 = w2
@@ -370,13 +370,12 @@ class Coupling(Joint):
         self.active = True
 
         self.mass = 0.0
-        self.accumulation = 0.0
 
     def preSolve(self):
         if not self.active:
             return
 
-        self.mass = self.w1.invMass + self.w2.invMass
+        self.mass = 0.0
         if self.w1.invInertia > 0.0:
             self.mass += self.w1.invInertia * self.w1.tire_radius * self.w1.tire_radius
         if self.w2.invInertia > 0.0:
@@ -392,13 +391,16 @@ class Coupling(Joint):
         v1 = self.w1.angVel * self.w1.tire_radius
         v2 = self.w2.angVel * self.w2.tire_radius
 
-        # flip sign
-        dv = v2-v1
-        p = self.mass * dv
+        # the lambda
+        lmb = -self.mass * (v1 - v2)
 
-        # apply impulse
-        self.w1.angVel += self.w1.invInertia * p
-        self.w2.angVel += self.w2.invInertia * -p
+        # the magnitude is different
+        p1 = self.w1.tire_radius * lmb
+        p2 = -self.w2.tire_radius * lmb
+
+        # apply both impulse
+        self.w1.angVel += self.w1.invInertia * p1
+        self.w2.angVel += self.w2.invInertia * p2
 
 # Differential. Represented as updatable joint
 class Differential(Updatable, Joint):
@@ -574,7 +576,7 @@ car_body = world.CreateDynamicBody(position=(5, 5), angle=0)
 car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=80.5, friction=0.3)
 
 front_wheel = Wheel(world, car_body, b2Vec2(1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 25.0, 95000, 9500, 0.8)
-rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 25.0, 95000, 9500, 0.8)
+rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS+0.2, 25.0, 95000, 9500, 0.8)
 
 # wheels.append(front_wheel)
 # wheels.append(rear_wheel)
@@ -591,7 +593,7 @@ lsd.active = False
 
 addDifferential(lsd)
 
-coupler = Coupling(front_wheel, rear_wheel)
+coupler = WheelTrack(front_wheel, rear_wheel)
 coupler.active = False
 # print(body)
 joints.append(coupler)
