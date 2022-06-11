@@ -182,7 +182,7 @@ class Wheel(Updatable, Joint):
             # if the last ground object is different, empty accumulator
             groundObject = self.callback.fixture.body
             if groundObject != self.lastGroundObject:
-                print("Different ground!")
+                # print(f"Different ground!, n({self.callback.normal[0]:.2f}, {self.callback.normal[1]:.2f})")
                 self.lastGroundObject = groundObject
                 self.accumT = 0.0
                 self.accumN = 0.0
@@ -478,6 +478,19 @@ class SpeedSensitiveLSD(Differential):
     def __init__(self, w1: Wheel, w2: Wheel, max_slip: float):
         super().__init__(w1, w2)
         self.max_slip = max_slip
+        self.effMass = 0.0 # different from parent's mass
+
+    def preSolve(self):
+        # parent's compute its own effective mass
+        super().preSolve()
+
+        # we compute different effective mass than parent's
+        self.effMass = self.w1.invInertia + self.w2.invInertia
+        # compute the real shiet
+        if self.effMass > 0.0:
+            self.effMass = 1.0 / self.effMass
+        else:
+            self.effMass = 0.0
 
     # only different in solving it I guess
     def solve(self):
@@ -486,17 +499,14 @@ class SpeedSensitiveLSD(Differential):
         # first, solve the differential as usual
         super().solve()
         # next, remove the speed difference up to a certain limit
-        difference = self.w1.angVel - self.w2.angVel
-        allowed = clamp(difference, -self.max_slip, self.max_slip)
-        # the error delta
-        dw = difference - allowed
+        dv = self.w1.angVel - self.w2.angVel
+        # clamp lambda (might need to multiply with current eff mass?)
+        allowed = clamp(dv, -self.max_slip, self.max_slip)
 
-        pt = self.massT * dw
-        # apply to both wheels and diff
-        self.w1.angVel += self.w1.invInertia * -pt
-        self.w2.angVel += self.w2.invInertia * pt
+        lmb = -self.effMass * (dv - allowed)
 
-        # self.angVel += self.invInertia * pt
+        self.w1.angVel += self.w1.invInertia * lmb
+        self.w2.angVel += self.w2.invInertia * -lmb
 
 # --- pygame setup ---
 pygame.font.init()
