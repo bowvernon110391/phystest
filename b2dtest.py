@@ -32,7 +32,7 @@ TIME_STEP = 1.0 / TARGET_FPS
 SCREEN_WIDTH, SCREEN_HEIGHT = 1024, 600
 
 TIRE_RADIUS = 0.5
-SUSPENSION_LENGTH = 1.75
+SUSPENSION_LENGTH = 1.35
 STATIC_TORQUE = 7200
 BUMP_IMPULSE = 1500
 ACCUMULATE = True   # use accumulation of impulse to converge faster
@@ -413,6 +413,9 @@ class Differential(Updatable, Joint):
         self.massT = 0.0 # the constraint mass
         self.active = True
 
+    def slip(self):
+        return self.w1.angVel - self.w2.angVel
+
     def applyTorque(self, t):
         self.torque += t
 
@@ -465,6 +468,30 @@ class Differential(Updatable, Joint):
 
         # apply to self
         self.angVel += self.invInertia * pt
+
+class SpeedSensitiveLSD(Differential):
+    def __init__(self, w1: Wheel, w2: Wheel, max_slip: float):
+        super().__init__(w1, w2)
+        self.max_slip = max_slip
+
+    # only different in solving it I guess
+    def solve(self):
+        if not self.active:
+            return
+        # first, solve the differential as usual
+        super().solve()
+        # next, remove the speed difference up to a certain limit
+        difference = self.w1.angVel - self.w2.angVel
+        allowed = clamp(difference, -self.max_slip, self.max_slip)
+        # the error delta
+        dw = difference - allowed
+
+        pt = self.massT * dw
+        # apply to both wheels and diff
+        self.w1.angVel += self.w1.invInertia * -pt
+        self.w2.angVel += self.w2.invInertia * pt
+
+        # self.angVel += self.invInertia * pt
 
 # --- pygame setup ---
 pygame.font.init()
@@ -520,7 +547,8 @@ ground_body.fixtures[0].friction=0.4
 
 # Create a couple dynamic bodies
 body = world.CreateDynamicBody(position=(2, 15))
-circle = body.CreateCircleFixture(radius=0.5, density=100, friction=0.9)
+# circle = body.CreateCircleFixture(radius=0.5, density=100, friction=0.9)
+box = body.CreatePolygonFixture(box=(0.5,0.5), density=1.0, friction=0.9)
 # circle.filterData.groupIndex=-2
 # body.ApplyLinearImpulse(Box2D.b2Vec2(5, 0), body.transform * Box2D.b2Vec2_zero, True)
 # body.linearVelocity = Box2D.b2Vec2(10.0, -15.0)
@@ -530,7 +558,8 @@ tire = body
 
 # second tire (slippery)
 body = world.CreateDynamicBody(position=(1, 15))
-circle2 = body.CreateCircleFixture(radius=0.5, density=50, friction=0.2)
+# circle2 = body.CreateCircleFixture(radius=0.5, density=50, friction=0.2)
+box = body.CreatePolygonFixture(box=(0.5,0.5), density=1.0, friction=0.2)
 # circle2.filterData.groupIndex=-2
 # body.linearVelocity = Box2D.b2Vec2(10.0, -15.0)
 
@@ -545,7 +574,7 @@ car_body = world.CreateDynamicBody(position=(5, 5), angle=0)
 car_shape = car_body.CreatePolygonFixture(box=(3.5, 1.25), density=80.5, friction=0.3)
 
 front_wheel = Wheel(world, car_body, b2Vec2(1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 25.0, 95000, 9500, 0.8)
-rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS+0.2, 28.0, 95000, 9500, 0.8)
+rear_wheel = Wheel(world, car_body, b2Vec2(-1.75, 0.0), SUSPENSION_LENGTH, TIRE_RADIUS, 25.0, 95000, 9500, 0.8)
 
 # wheels.append(front_wheel)
 # wheels.append(rear_wheel)
@@ -556,6 +585,11 @@ diff = Differential(front_wheel, rear_wheel)
 diff.active = False
 
 addDifferential(diff)
+
+lsd = SpeedSensitiveLSD(front_wheel, rear_wheel, 50.0)
+lsd.active = False
+
+addDifferential(lsd)
 
 coupler = Coupling(front_wheel, rear_wheel)
 coupler.active = False
@@ -672,6 +706,10 @@ modes = [
     {
         'name': "AWD with open differential",
         'wheel': diff
+    },
+    {
+        'name': f"Speed Sensitive Limited Slip Differential",
+        'wheel': lsd
     }
 ]
 mode = 0
@@ -690,6 +728,7 @@ while running:
     # activate/deactivate shit depending on mode
     coupler.active = True if mode == 2 else False
     diff.active = True if mode == 3 else False
+    lsd.active = True if mode == 4 else False
     # Check the event queue
     for event in pygame.event.get():
         if event.type == QUIT or (event.type == KEYDOWN and event.key == K_ESCAPE):
@@ -733,8 +772,8 @@ while running:
         if event.type == KEYUP and event.key == pygame.K_F2:
             ACCUMULATE = not ACCUMULATE
 
-        if event.type == KEYUP and event.key == pygame.K_c:
-            coupler.active = not coupler.active
+        # if event.type == KEYUP and event.key == pygame.K_c:
+        #     coupler.active = not coupler.active
             
     
     # tire.ApplyTorque(torque_mult * 5.0, True)
@@ -823,7 +862,10 @@ while running:
         pos_y += 16
 
     if mode == 3:
-        draw_text(f"diff: w({diff.angVel:.2f}), invInertia({diff.invInertia:.2f})", (pos_x, pos_y))
+        draw_text(f"open differential: w({diff.angVel:.2f}), invInertia({diff.invInertia:.2f}), slip({diff.slip():.2f})", (pos_x, pos_y))
+
+    if mode == 4:
+        draw_text(f"Speed Sensitive LSD: w({lsd.angVel:.2f}), invInertia({lsd.invInertia:.2f}), slip({lsd.slip():.2f}), max_slip({lsd.max_slip:.2f})", (pos_x, pos_y))
 
     # Flip the screen and try to keep at the target FPS
     pygame.display.flip()
